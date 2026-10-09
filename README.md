@@ -1,4 +1,4 @@
-# address-to-lat-long
+# Address To Latitude and Longitude
 
 A simple tool that turns a street address into latitude and longitude. It is a single HTML page: no install, no account, no API key.
 
