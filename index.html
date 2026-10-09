@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Address to Lat/Long</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 820px; margin: 60px auto; padding: 0 16px; color: #222; }
+  h1 { font-size: 1.3rem; }
+  h2 { font-size: 1.1rem; margin-top: 48px; padding-top: 24px; border-top: 1px solid #ddd; }
+  form { display: flex; gap: 8px; }
+  input[type=text], textarea { flex: 1; padding: 10px; font-size: 1rem; border: 1px solid #bbb; border-radius: 6px; font-family: inherit; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 140px; resize: vertical; }
+  button { padding: 10px 16px; font-size: 1rem; border: 0; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.secondary { background: #e5e7eb; color: #222; }
+  #out { margin-top: 20px; }
+  .row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+  .label { width: 90px; color: #666; }
+  .val { font: 1.1rem ui-monospace, Consolas, monospace; }
+  .copy { padding: 4px 10px; font-size: .85rem; background: #e5e7eb; color: #222; }
+  .match, .hint { color: #666; font-size: .9rem; margin-bottom: 12px; }
+  .err { color: #b91c1c; }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+  #progress { color: #444; font-size: .95rem; }
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; margin-top: 8px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+  th { color: #666; font-weight: 600; white-space: nowrap; }
+  td.num { font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
+  td input { width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: .9rem; }
+  tr.miss td, tr.error td { background: #fef2f2; }
+  tr.working td { background: #eff6ff; }
+  footer { margin-top: 40px; font-size: .8rem; color: #888; }
+</style>
+</head>
+<body>
+<h1>Address → Latitude / Longitude</h1>
+<form id="f">
+  <input type="text" id="q" placeholder="e.g. 1600 Pennsylvania Ave NW, Washington, DC" autofocus required>
+  <button id="go">Look up</button>
+</form>
+<div id="out"></div>
+
+<h2>Batch mode</h2>
+<p class="hint">Paste one address per line, or load a .csv or .txt file. Lookups run at about one per second.</p>
+<textarea id="list" placeholder="1600 Pennsylvania Ave NW, Washington, DC&#10;350 Fifth Ave, New York, NY&#10;..."></textarea>
+<div class="bar">
+  <input type="file" id="file" accept=".csv,.txt,text/csv,text/plain">
+  <span id="fileNote" class="hint" style="margin:0"></span>
+</div>
+<div class="bar">
+  <button id="start">Start batch</button>
+  <button id="stop" class="secondary" disabled>Stop</button>
+  <button id="retry" class="secondary" disabled>Retry failed</button>
+  <button id="download" class="secondary" disabled>Download CSV</button>
+  <span id="progress"></span>
+</div>
+<div class="tablewrap">
+  <table id="table" hidden>
+    <thead><tr><th>#</th><th>Address</th><th>Matched</th><th>Latitude</th><th>Longitude</th><th>Status</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<footer>Geocoding by OpenStreetMap Nominatim. © OpenStreetMap contributors.</footer>
+
+<script>
+async function geocode(address) {
+  const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=' + encodeURIComponent(address);
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error('Service returned ' + res.status);
+  const data = await res.json();
+  return data[0] || null;
+}
+
+// ---- Single lookup ----
+const f = document.getElementById('f'), q = document.getElementById('q'),
+      go = document.getElementById('go'), out = document.getElementById('out');
+
+function row(label, value) {
+  const d = document.createElement('div'); d.className = 'row';
+  const l = document.createElement('span'); l.className = 'label'; l.textContent = label;
+  const v = document.createElement('span'); v.className = 'val'; v.textContent = value;
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'copy'; b.textContent = 'Copy';
+  b.onclick = () => navigator.clipboard.writeText(value).then(() => {
+    b.textContent = 'Copied'; setTimeout(() => b.textContent = 'Copy', 1200);
+  });
+  d.append(l, v, b);
+  return d;
+}
+
+f.addEventListener('submit', async e => {
+  e.preventDefault();
+  go.disabled = true;
+  out.textContent = 'Searching…';
+  try {
+    const hit = await geocode(q.value.trim());
+    out.textContent = '';
+    if (!hit) {
+      out.innerHTML = '<p class="err">No match found. Try adding a city, state or postcode.</p>';
+      return;
+    }
+    const { lat, lon, display_name } = hit;
+    const m = document.createElement('div'); m.className = 'match'; m.textContent = 'Matched: ' + display_name;
+    out.append(m, row('Latitude', lat), row('Longitude', lon), row('Lat, Long', lat + ', ' + lon));
+  } catch (err) {
+    out.innerHTML = '';
+    const p = document.createElement('p'); p.className = 'err'; p.textContent = 'Lookup failed: ' + err.message;
+    out.append(p);
+  } finally {
+    go.disabled = false;
+  }
+});
+
+// ---- Batch mode ----
+const DELAY_MS = 1100; // Nominatim allows at most one request per second
+const list = document.getElementById('list'), file = document.getElementById('file'),
+      fileNote = document.getElementById('fileNote'), start = document.getElementById('start'),
+      stop = document.getElementById('stop'), retry = document.getElementById('retry'),
+      download = document.getElementById('download'), progress = document.getElementById('progress'),
+      table = document.getElementById('table'), tbody = table.querySelector('tbody');
+
+let rows = [];          // { address, status, lat, lon, matched, note, tr }
+let running = false, stopRequested = false;
+const STATUS_TEXT = { pending: 'Waiting', working: 'Searching…', ok: 'Found', miss: 'Not found', error: 'Error' };
+const failed = r => r.status === 'miss' || r.status === 'error';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function parseCSV(text) {
+  const result = []; let record = [], cell = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else inQuotes = false; }
+      else cell += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ',') { record.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      record.push(cell); result.push(record); record = []; cell = '';
+    } else cell += c;
+  }
+  if (cell || record.length) { record.push(cell); result.push(record); }
+  return result;
+}
+
+file.addEventListener('change', async () => {
+  const picked = file.files[0];
+  if (!picked) return;
+  const text = (await picked.text()).replace(/^﻿/, '');
+  let addresses, how;
+  if (/\.csv$/i.test(picked.name)) {
+    const records = parseCSV(text).filter(r => r.some(c => c.trim()));
+    const col = records.length ? records[0].findIndex(h => /address/i.test(h)) : -1;
+    if (col >= 0) {
+      addresses = records.slice(1).map(r => r[col] || '');
+      how = 'from column "' + records[0][col].trim() + '"';
+    } else {
+      // No address column: treat every row as one address made of all its cells
+      addresses = records.map(r => r.map(c => c.trim()).filter(Boolean).join(', '));
+      how = records[0] && records[0].length > 1 ? 'by joining each row\'s columns (delete the header line if there is one)' : '';
+    }
+  } else {
+    addresses = text.split(/\r?\n/);
+    how = '';
+  }
+  addresses = addresses.map(a => a.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  list.value = addresses.join('\n');
+  fileNote.textContent = 'Loaded ' + addresses.length + ' addresses ' + how;
+});
+
+function renderRow(i) {
+  const r = rows[i];
+  if (!r.tr) { r.tr = document.createElement('tr'); tbody.append(r.tr); }
+  r.tr.className = r.status;
+  r.tr.textContent = '';
+  const td = (text, cls) => { const c = document.createElement('td'); if (cls) c.className = cls; c.textContent = text || ''; r.tr.append(c); return c; };
+  td(i + 1);
+  if (failed(r) && !running) {
+    // Failed rows stay editable so they can be corrected and retried
+    const cell = td('');
+    const input = document.createElement('input'); input.type = 'text'; input.value = r.address;
+    input.oninput = () => { r.address = input.value; };
+    cell.append(input);
+  } else td(r.address);
+  td(r.matched);
+  td(r.lat, 'num');
+  td(r.lon, 'num');
+  td(r.note || STATUS_TEXT[r.status]);
+}
+
+function updateControls() {
+  const done = rows.filter(r => r.status !== 'pending' && r.status !== 'working').length;
+  const bad = rows.filter(failed).length;
+  start.disabled = running;
+  stop.disabled = !running;
+  retry.disabled = running || !bad;
+  download.disabled = running || !done;
+  list.disabled = file.disabled = running;
+  if (rows.length) {
+    progress.textContent = done + ' of ' + rows.length + ' done' + (bad ? ', ' + bad + ' failed' : '') +
+      (running ? '' : stopRequested && done < rows.length ? ' (stopped)' : '');
+  }
+}
+
+async function run(indices) {
+  running = true; stopRequested = false;
+  rows.forEach((r, i) => renderRow(i));
+  updateControls();
+  for (let n = 0; n < indices.length && !stopRequested; n++) {
+    const i = indices[n], r = rows[i];
+    r.status = 'working'; r.note = ''; renderRow(i);
+    try {
+      const hit = await geocode(r.address.trim());
+      if (hit) Object.assign(r, { status: 'ok', lat: hit.lat, lon: hit.lon, matched: hit.display_name });
+      else r.status = 'miss';
+    } catch (err) {
+      r.status = 'error'; r.note = err.message;
+      // Being rate limited or blocked: carrying on would only make it worse
+      if (/\b(429|403)\b/.test(err.message)) stopRequested = true;
+    }
+    renderRow(i); updateControls();
+    if (n < indices.length - 1 && !stopRequested) await sleep(DELAY_MS);
+  }
+  running = false;
+  rows.forEach((r, i) => { if (r.status === 'working') r.status = 'pending'; renderRow(i); });
+  updateControls();
+}
+
+start.addEventListener('click', () => {
+  const addresses = list.value.split(/\r?\n/).map(a => a.trim()).filter(Boolean);
+  if (!addresses.length) { progress.textContent = 'Add at least one address first.'; return; }
+  tbody.textContent = '';
+  rows = addresses.map(address => ({ address, status: 'pending', lat: '', lon: '', matched: '', note: '' }));
+  table.hidden = false;
+  run(rows.map((_, i) => i));
+});
+
+stop.addEventListener('click', () => { stopRequested = true; stop.disabled = true; });
+
+retry.addEventListener('click', () => {
+  // Also picks up rows left waiting after a stop
+  run(rows.map((r, i) => failed(r) || r.status === 'pending' ? i : -1).filter(i => i >= 0));
+});
+
+download.addEventListener('click', () => {
+  const esc = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const lines = [['address', 'matched_address', 'latitude', 'longitude', 'status'].join(',')];
+  for (const r of rows) lines.push([r.address, r.matched, r.lat, r.lon, r.note || STATUS_TEXT[r.status]].map(esc).join(','));
+  // BOM so Excel reads accented characters correctly
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'geocoded.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+</script>
+</body>
+</html>
