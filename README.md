@@ -13,7 +13,7 @@ A simple tool that turns a street address into latitude and longitude. It is a s
 
 🖼️ **[View the Live Website](https://wv-web-developers.github.io/imei-check/)**
 
-That's all. An internet connection is required, because lookups are sent to the OpenStreetMap Nominatim service.
+An internet connection is required because lookups are sent to the OpenStreetMap Nominatim service.
 
 ## How to use
 
