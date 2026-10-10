@@ -11,7 +11,7 @@ A simple tool that turns a street address into latitude and longitude. It is a s
 
 ## How to run
 
-🖼️ **[View the Live Website](https://wv-web-developers.github.io/imei-check/)**
+🖼️ **[View the Live Website](https://wv-web-developers.github.io/address-to-lat-long/)**
 
 An internet connection is required because lookups are sent to the OpenStreetMap Nominatim service.
 
